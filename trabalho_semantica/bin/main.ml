@@ -41,6 +41,8 @@ type tipo =
 type expr = 
     Nv of int (* n *)
   | Bv of bool (* b *)
+  | True
+  | False
   | Bop of bop * expr * expr (* e1 op e2  *)
   | If  of expr * expr * expr (* if e1 then e2 else e3 *)
   | Id  of string (* x *)
@@ -67,12 +69,23 @@ let rec lookup (g:tyEnv) (x:string) : tipo option =
   | (y,t):: tail -> if x=y then Some t else lookup tail x
           
 exception TypeError
+(* Γ ⊢ n : int (Tint)
+   Γ ⊢ b : bool (Tbool)
+   (Γ ⊢ e1 : int) && (Γ ⊢ e2 : int) => Γ ⊢ e1 + e2 : int (TOp+)
+   (Γ ⊢ e1 : int) && (Γ ⊢ e2 : int) => Γ ⊢ e1 ≥ e2 : bool (TOP≥) 
+   (Γ ⊢ e1 : bool) && (Γ ⊢ e2 : T) && (Γ ⊢ e3 : T) => Γ ⊢ if e1 then e2 else e3 : T (Tif)
+   Γ(x) = T => Γ ⊢ x : T (Tvar)
+   Γ, x : T ⊢ e : T′ => Γ ⊢ fn x : T ⇒ e : T → T′ (Tfn)
+   (Γ ⊢ e1 : T → T′) && (Γ ⊢ e2 : T) => Γ ⊢ e1 e2 : T′ (Tapp)
+   (Γ ⊢ e1 : T) && (Γ, x : T ⊢ e2 : T′) => Γ ⊢ let x:T = e1 in e2 : T′ (Tlet)
+   (Γ, f: T1→ T2, x : T1 ⊢ e1 : T2) && 'Γ, f: T1→ T2 ⊢ e2 : T) => Γ ⊢ let rec f :T1→ T2 = (fn x:T1 ⇒ e1) in e2 : T (Tletrec)
+*)
 let rec typeinfer (g:tyEnv) (e:expr) : tipo =
   match e with
-    Nv _ -> Int
-  | Bv _ -> Bool
-    
-  | Bop(o1,e1,e2) ->
+    Nv _ -> Int (* Γ ⊢ n : int (Tint) *)
+  | Bv _ -> Bool (* Γ ⊢ b : bool (Tbool) *)
+
+  | Bop(o1,e1,e2) -> 
       let t1 = typeinfer g e1 in
       let t2 = typeinfer g e2 in
       (match o1 with
@@ -82,31 +95,31 @@ let rec typeinfer (g:tyEnv) (e:expr) : tipo =
            if(t1=Int) && (t2=Int) then Bool else raise TypeError
        | And | Or ->
            if (t1=Bool) && (t2=Bool) then Bool else raise TypeError
-      )
-      
+      ) (* (Γ ⊢ e1 : int) && (Γ ⊢ e2 : int) => Γ ⊢ e1 + e2 : int (TOp+) etc *)
+    
   | If(e1,e2,e3) ->
       let t1 = typeinfer g e1 in
       if (t1=Bool) then
         let t2 = typeinfer g e2 in
         let t3 = typeinfer g e3 in
         if (t2=t3) then t2 else raise TypeError 
-      else raise TypeError
-          
+      else raise TypeError (* (Γ ⊢ e1 : bool) && (Γ ⊢ e2 : T) && (Γ ⊢ e3 : T) => Γ ⊢ if e1 then e2 else e3 : T (Tif) *)
+      
   | Id x ->
       (match lookup g x with
          None -> raise TypeError
-       | Some t -> t)
+       | Some t -> t) (* Γ(x) = T => Γ ⊢ x : T (Tvar) *)
       
   | Fun(x,t,e1) ->
       let g' = (x,t)::g in
       let t1 = typeinfer g' e1 in
-      Arrow(t,t1)
+      Arrow(t,t1) (* Γ, x : T ⊢ e : T′ => Γ ⊢ fn x : T ⇒ e : T → T′ (Tfn) *)
         
   | Let(x,t,e1,e2) ->
       let t1 = typeinfer g e1 in
       let g' = (x,t)::g in
       let t2 = typeinfer g' e2 in
-      if t1=t then t2 else raise TypeError
+      if t1=t then t2 else raise TypeError (*(Γ ⊢ e1 : T) && (Γ, x : T ⊢ e2 : T′) => Γ ⊢ let x:T = e1 in e2 : T′ (Tlet) *)
           
   | App(e1,e2) ->
       let t1 = typeinfer g e1 in
@@ -115,12 +128,71 @@ let rec typeinfer (g:tyEnv) (e:expr) : tipo =
            let t2 = typeinfer g e2 in
            if t=t2 then t' else raise TypeError
        | _ -> raise TypeError
-      )
+      )  (* (Γ ⊢ e1 : T → T′) && (Γ ⊢ e2 : T) => Γ ⊢ e1 e2 : T′ (Tapp) *)
+      | LetRec(f, Arrow(t1, t2), Fun(y, t1', e1), e2) ->
+        if t1 = t1' then
+          let g' = (f, Arrow(t1, t2)) :: (y, t1) :: g in
+          let t1_body = typeinfer g' e1 in
+          if t1_body = t2 then typeinfer ((f, Arrow(t1, t2)) :: g) e2
+          else raise TypeError
+        else raise TypeError
   
+    | Nil t -> List t
+  
+    | Cons(e1, e2) ->
+        let t1 = typeinfer g e1 in
+        let t2 = typeinfer g e2 in
+        (match t2 with
+         | List t when t = t1 -> List t
+         | _ -> raise TypeError)
+  
+    | IsEmpty(e) ->
+        (match typeinfer g e with
+         | List _ -> Bool
+         | _ -> raise TypeError)
+  
+    | Hd(e) ->
+        (match typeinfer g e with
+         | List t -> t
+         | _ -> raise TypeError)
+  
+    | Tl(e) ->
+        (match typeinfer g e with
+         | List t -> List t
+         | _ -> raise TypeError)
+  
+    | Match(e1, e2, x, xs, e3) ->
+        (match typeinfer g e1 with
+         | List t ->
+             let t2 = typeinfer g e2 in
+             let g' = (x, t) :: (xs, List t) :: g in
+             let t3 = typeinfer g' e3 in
+             if t2 = t3 then t2 else raise TypeError
+         | _ -> raise TypeError)
+  
+    | Nothing(t) -> Maybe t
+  
+    | Just(e) ->
+        let t = typeinfer g e in
+        Maybe t
+  
+    | MatchMaybe(e1, e2, x, e3, y, e4) ->
+        (match typeinfer g e1 with
+         | Maybe t ->
+             let t2 = typeinfer g e2 in
+             let g1 = (x, t) :: g in
+             let t3 = typeinfer g1 e3 in
+             if t2 = t3 then
+               let g2 = (y, Maybe t) :: g in
+               let t4 = typeinfer g2 e4 in
+               if t2 = t4 then t2 else raise TypeError
+             else raise TypeError
+         | _ -> raise TypeError)  
+          
         
 (* ======= AVALIADOR =========================*)
 
-let value (e:expr) : bool =
+let _value (e:expr) : bool =
   match e with
     Nv _ | Bv _ | Fun _ -> true
   | _ -> false
@@ -141,14 +213,13 @@ let rec subs (v: expr) (x: string) (e: expr) =
   | Let (y, t, e1, e2) ->
       if x = y then Let (y, t, subs v x e1, e2) (* {v/x}(let x:T = e1 in e2) = let x:T = {v/x}e1 in e2 *)
       else Let (y, t, subs v x e1, subs v x e2) (* {v/x}(let y:T = e1 in e2) = let y:T = {v/x}e1 in {v/x}e2 (se x̸ = y) *)
-  | LetRec(f,Arrow(t1,t2),Fun(y,t1,e1),e2) ->
+  | LetRec(f,Arrow(t1,t2),Fun(y,t3,e1),e2) ->
       if x = f then e (* {v/f }(let rec f : T1 → T2 = (fn y:T1 ⇒ e1) = let rec f : T1 → T2 = (fn y:T1 ⇒ e1) in e2) in e2 *)
-      else LetRec(f,Arrow(t1,t2),Fun(y,t1,subs v x e1),subs v x e2) (* {v/x}(let rec f : T1 → T2 = (fn y:T1 ⇒ e1) = let rec f : T1 → T2 = {v/x}(fn y:T1 ⇒ e1) in e2) in {v/x} e2 se x̸ = f *)
+      else LetRec(f,Arrow(t1,t2),Fun(y,t3,subs v x e1),subs v x e2) (* {v/x}(let rec f : T1 → T2 = (fn y:T1 ⇒ e1) = let rec f : T1 → T2 = {v/x}(fn y:T1 ⇒ e1) in e2) in {v/x} e2 se x̸ = f *)
       
           
 exception DivZero
 exception FixTypeInfer 
-exception NoRuleApplies 
   
 let compute (o:bop) (v1:expr) (v2:expr) =
   match (v1,v2) with
@@ -169,53 +240,80 @@ let compute (o:bop) (v1:expr) (v2:expr) =
        | Or -> Bv(b1 || b2)
        | _ -> raise FixTypeInfer)
   | _ -> raise FixTypeInfer
-                  
-  
-let rec step (e:expr) : expr =
-  match e with
-    Nv _ -> raise NoRuleApplies
-  | Bv _ -> raise NoRuleApplies
-              
-  | Bop(o,v1,v2) when (value v1) && (value v2) ->
-      compute o v1 v2
-  | Bop(o,v1,e2) when value v1 ->
-      let e2' = step e2 in Bop(o,v1,e2')
-  | Bop(o,e1,v2) when value v2 ->
-      let e1' = step e1 in Bop(o,e1',v2)
 
-  | If(e1,e2,e3) -> 
-      let e1' = step e1 in If(e1',e2,e3) 
-        
-  | Id _ -> raise NoRuleApplies
-  | Fun(_,_,_) -> raise NoRuleApplies
-                     
-  | Let(x,_,v1,e2) when value v1 -> subs v1 x e2 (* {v1/x} e2 *)
-  | Let(x,t,e1,e2) ->
-      let e1' = step e1 in Let(x,t,e1',e2)
-        
-  | App(Fun(x,_,e1), v2) when value v2 ->
-      subs v2 x e1
-  | App(v1,e2) when value v1 ->
-      let e2' = step e2 in App(v1,e2')
-  | App(e1,e2) ->
-      let e1' = step e1 in App(e1',e2)
-  | _ -> raise NoRuleApplies
-  
-        (*| Iszero Zero -> True
-         | Iszero (Succ nv) when isnumericvalue nv -> False
-  | Iszero e1 ->
-      let e1' = step e1 in Iszero e1'
-        
-  | Succ e1 -> 
-      let e1' = step e1 in Succ e1' *)
-        
-                                                                               
+(* Semantica Operacional big step com substituicao para L1 *)
+(* n ⇓ n (bnum)
+   b ⇓ b (bbool)
+   (e1 ⇓ false) && (e3 ⇓ v) => ρ ⊢ if e1 then e2 else e3 ⇓ v (biff)
+   fn x : T ⇒ e ⇓ fn x : T ⇒ e (bfn)
+   (e1 ⇓ n1) && (e2 ⇓ n2) && ([[n]] = [[n1]+[[n2]) => e1 + e2 ⇓ n (bop+)
+   (e1 ⇓ true) && (e2 ⇓ v) => if e1 then e2 else e3 ⇓ v (bift)
+   (e1 ⇓ v′) &&({v′/x} e2 ⇓ v) => let x : T = e1 in e2 ⇓ v (blet)
+   (e1 ⇓ fn x : T ⇒ e) && (e2 ⇓ v2) && ({v2/x} e ⇓ v) => e1 e2 ⇓ v (bapp)
+   {α/f } e2 ⇓ v => let rec f : T → T ′ = fn x : T ⇒ e1 in e2 ⇓ v (blrec)
+     α ≡ fn x : T ⇒ let rec f : T → T ′ = (fn x : T ⇒ e1) in e1
+*)
+exception EvalError                                                            
 let rec eval(e:expr) : expr =
-  try 
-    let e' = step e in eval e'
-  with
-    NoRuleApplies -> e 
-    
+  match e with
+  | Nv n -> Nv(n) (* n ⇓ n (bnum) *)
+  | Bv b -> Bv(b) (* b ⇓ b (bbool) *)
+  | Bop(o,e1,e2) ->
+      let n1 = eval e1 in
+      let n2 = eval e2 in
+      compute o n1 n2 (* (e1 ⇓ n1) && (e2 ⇓ n2) && ([[n]] = [[n1]+[[n2]) => e1 + e2 ⇓ n (bop+) *)
+  | If(e1,e2,e3) ->
+      let v1 = eval e1 in
+      if v1=True then eval e2 else eval e3 (* (e1 ⇓ true) && (e2 ⇓ v) => if e1 then e2 else e3 ⇓ v (bift) *)
+  | Fun(_,_,_) -> e (* fn x : T ⇒ e ⇓ fn x : T ⇒ e (bfn) *)
+  | Let(x,_,e1,e2) ->
+      let v1 = eval e1 in
+      eval (subs v1 x e2) (* (e1 ⇓ v′) &&({v′/x} e2 ⇓ v) => let x : T = e1 in e2 ⇓ v (blet) *)
+  | App(Fun(x,_,e1),e2) ->
+      let f = eval e1 in 
+      let v2 = eval e2 in
+      eval (subs v2 x f) (* (e1 ⇓ fn x : T ⇒ e) && (e2 ⇓ v2) && ({v2/x} e ⇓ v) => e1 e2 ⇓ v (bapp) *)
+  | LetRec(f, Arrow(t,t1), Fun(x, _, e1), e2) ->
+      let alpha = Fun(x, t, LetRec(f, Arrow(t,t1), Fun(x, t, e1), e1)) in
+      eval (subs alpha f e2) (* {α/f } e2 ⇓ v => let rec f : T → T ′ = fn x : T ⇒ e1 in e2 ⇓ v (blrec) *)
+  | Nil _ -> e (* nil ⇓ nil (bnil) *)
+  | Cons(e1, e2) ->
+      let v1 = eval e1 in
+      let v2 = eval e2 in
+      Cons(v1, v2) (* (e1 ⇓ v1) && (e2 ⇓ v2) => e1::e2 ⇓ v1::v2 (bcons) *)
+  | IsEmpty(e1) ->
+      let v1 = eval e1 in
+      (match v1 with
+        | Nil _ -> Bv true
+        | Cons(_, _) -> Bv false
+        | _ -> raise EvalError) (* isempty nil ⇓ true, isempty v ⇓ false for non-empty lists (bisempty) *)
+  | Hd(e1) ->
+      let v1 = eval e1 in
+      (match v1 with
+        | Cons(hd, _) -> hd
+        | _ -> raise EvalError) (* hd (v::vs) ⇓ v (bhd) *)
+  | Tl(e1) ->
+      let v1 = eval e1 in
+      (match v1 with
+        | Cons(_, tl) -> tl
+        | _ -> raise EvalError) (* tl (v::vs) ⇓ vs (btl) *)
+  | Match(e1, e2, x, xs, e3) ->
+      let v1 = eval e1 in
+      (match v1 with
+        | Nil _ -> eval e2
+        | Cons(hd, tl) -> eval (subs tl xs (subs hd x e3))
+        | _ -> raise EvalError) (* match nil -> e2 | x::xs -> e3 (bmatchlist) *)
+  | Nothing _ -> e (* nothing ⇓ nothing (bnothing) *)
+  | Just(e1) ->
+      let v1 = eval e1 in
+      Just v1 (* e1 ⇓ v => just e1 ⇓ just v (bjust) *)
+  | MatchMaybe(e1, e2, x, e3, _, _) ->
+      let v1 = eval e1 in
+      (match v1 with
+        | Nothing _ -> eval e2
+        | Just(vx) -> eval (subs vx x e3)
+        | _ -> raise EvalError) (* match nothing -> e2 | just x -> e3 (bmatchmaybe) *)
+
     
 (*===== INTEPRETADOR ========================*)
 
