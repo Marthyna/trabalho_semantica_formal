@@ -1,0 +1,4 @@
+(executable
+ (public_name trabalho_semantica)
+ (name main)
+ (libraries trabalho_semantica))
