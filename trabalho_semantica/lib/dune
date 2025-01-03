@@ -1,2 +1,3 @@
 (library
- (name trabalho_semantica))
+ (name interpreter)
+ (public_name trabalho_semantica))
