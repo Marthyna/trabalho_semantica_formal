@@ -221,8 +221,6 @@ let tests = [
     | Error _ -> false
   );
 
-  (*  *)
-
 ]
 
 let _ = QCheck_runner.run_tests ~verbose:true tests

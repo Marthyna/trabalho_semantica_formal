@@ -76,42 +76,41 @@ module Interpreter = struct
     | Maybe t -> "maybe " ^ stroftipo t
     | List t -> stroftipo t ^ " list" ;;
 
-    let rec strofexpr = function
-  | Nv n  -> string_of_int n
-  | Bv b -> string_of_bool b
-  | True -> "true"
-  | False -> "false"
-  | Bop (op, e1, e2) -> 
-      let op_str = match op with
-        | Sum -> "+"
-        | Sub -> "-"
-        | Mul -> "*"
-        | Div -> "/"
-        | And -> "&&"
-        | Or -> "||"
-        | Eq -> "=="
-        | Gt -> ">"
-        | Lt -> "<"
-        | Neq -> "!="
-      in
-      "(" ^ strofexpr e1 ^ " " ^ op_str ^ " " ^ strofexpr e2 ^ ")"
-  | If (cond, t_branch, f_branch) -> 
-      "if " ^ strofexpr cond ^ " then " ^ strofexpr t_branch ^ " else " ^ strofexpr f_branch
-  | Id x -> x
-  | App (e1, e2) -> strofexpr e1 ^ " " ^ strofexpr e2
-  | Fun (x, _, e) -> "fn " ^ x ^ " => " ^ strofexpr e
-  | Let (x, _, e1, e2) -> "let " ^ x ^ " = " ^ strofexpr e1 ^ " in " ^ strofexpr e2
-  | LetRec (f, _, e1, e2) -> "let rec " ^ f ^ " = " ^ strofexpr e1 ^ " in " ^ strofexpr e2
-  | Nil _ -> "[]"
-  | Cons (e1, e2) -> strofexpr e1 ^ "::" ^ strofexpr e2
-  | IsEmpty e -> "isempty " ^ strofexpr e
-  | Hd e -> "hd " ^ strofexpr e
-  | Tl e -> "tl " ^ strofexpr e
-  | Match (e1, e2, x, xs, e3) -> "match " ^ strofexpr e1 ^ " with | [] -> " ^ strofexpr e2 ^ " | " ^ x ^ "::" ^ xs ^ " -> " ^ strofexpr e3
-  | Nothing _ -> "nothing"
-  | Just e -> "just " ^ strofexpr e
-  | MatchMaybe (e1, e2, e3) -> "match " ^ strofexpr e1 ^ " with | nothing -> " ^ strofexpr e2 ^ " | just x" ^ " -> " ^ strofexpr e3 ;;
-
+  let rec strofexpr = function
+    | Nv n  -> string_of_int n
+    | Bv b -> string_of_bool b
+    | True -> "true"
+    | False -> "false"
+    | Bop (op, e1, e2) -> 
+        let op_str = match op with
+          | Sum -> "+"
+          | Sub -> "-"
+          | Mul -> "*"
+          | Div -> "/"
+          | And -> "&&"
+          | Or -> "||"
+          | Eq -> "=="
+          | Gt -> ">"
+          | Lt -> "<"
+          | Neq -> "!="
+        in
+        "(" ^ strofexpr e1 ^ " " ^ op_str ^ " " ^ strofexpr e2 ^ ")"
+    | If (cond, t_branch, f_branch) -> 
+        "if " ^ strofexpr cond ^ " then " ^ strofexpr t_branch ^ " else " ^ strofexpr f_branch
+    | Id x -> x
+    | App (e1, e2) -> strofexpr e1 ^ " " ^ strofexpr e2
+    | Fun (x, _, e) -> "fn " ^ x ^ " => " ^ strofexpr e
+    | Let (x, _, e1, e2) -> "let " ^ x ^ " = " ^ strofexpr e1 ^ " in " ^ strofexpr e2
+    | LetRec (f, _, e1, e2) -> "let rec " ^ f ^ " = " ^ strofexpr e1 ^ " in " ^ strofexpr e2
+    | Nil _ -> "[]"
+    | Cons (e1, e2) -> strofexpr e1 ^ "::" ^ strofexpr e2
+    | IsEmpty e -> "isempty " ^ strofexpr e
+    | Hd e -> "hd " ^ strofexpr e
+    | Tl e -> "tl " ^ strofexpr e
+    | Match (e1, e2, x, xs, e3) -> "match " ^ strofexpr e1 ^ " with | [] -> " ^ strofexpr e2 ^ " | " ^ x ^ "::" ^ xs ^ " -> " ^ strofexpr e3
+    | Nothing _ -> "nothing"
+    | Just e -> "just " ^ strofexpr e
+    | MatchMaybe (e1, e2, e3) -> "match " ^ strofexpr e1 ^ " with | nothing -> " ^ strofexpr e2 ^ " | just x" ^ " -> " ^ strofexpr e3 ;;
 
   let rec typeinfer (g:tyEnv) (e:expr) : tipo =
     match e with
