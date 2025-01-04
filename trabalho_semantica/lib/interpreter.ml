@@ -58,29 +58,61 @@ module Interpreter = struct
     | Match of expr * expr * string * string * expr (* match e1 with | nil -> e2 | x::xs -> e3 *)
     | Nothing of tipo (* nothing : T *)
     | Just of expr (* just e *)
-    | MatchMaybe of expr * expr * string * expr * string * expr (* match e1 with | nothing -> e2 | just x -> e3 *) ;;
+    | MatchMaybe of expr * expr * expr (* match e1 with | nothing -> e2 | just x -> e3 *) ;;
     
   (*=========== TYPEINFER ===================*)
-  type tyEnv =  (string * tipo) list ;;
+  type tyEnv =  (string * tipo * expr option) list ;;
       
-  let rec lookup (g:tyEnv) (x:string) : tipo option =
+  let rec lookup (g:tyEnv) (x:string) : (tipo * expr option) option =
     match g with
       [] -> None
-    | (y,t):: tail -> if x=y then Some t else lookup tail x ;;
-            
-  exception TypeError ;;
-  (* Γ ⊢ n : int (Tint)
-    Γ ⊢ b : bool (Tbool)
-    (Γ ⊢ e1 : int) && (Γ ⊢ e2 : int) => Γ ⊢ e1 + e2 : int (TOp+)
-    (Γ ⊢ e1​ : int) && (Γ ⊢ e2 ​: int) && (e2 != 0) => Γ ⊢ e1​ div e2 : int
-    (Γ ⊢ e1 : int) && (Γ ⊢ e2 : int) => Γ ⊢ e1 ≥ e2 : bool (TOP≥) 
-    (Γ ⊢ e1 : bool) && (Γ ⊢ e2 : T) && (Γ ⊢ e3 : T) => Γ ⊢ if e1 then e2 else e3 : T (Tif)
-    Γ(x) = T => Γ ⊢ x : T (Tvar)
-    Γ, x : T ⊢ e : T′ => Γ ⊢ fn x : T ⇒ e : T → T′ (Tfn)
-    (Γ ⊢ e1 : T → T′) && (Γ ⊢ e2 : T) => Γ ⊢ e1 e2 : T′ (Tapp)
-    (Γ ⊢ e1 : T) && (Γ, x : T ⊢ e2 : T′) => Γ ⊢ let x:T = e1 in e2 : T′ (Tlet)
-    (Γ, f: T1→ T2, y : T1 ⊢ e1 : T2) && 'Γ, f: T1→ T2 ⊢ e2 : T) => Γ ⊢ let rec f : T1→ T2 = (fn y:T1 ⇒ e1) in e2 : T (Tletrec)
-  *)
+    | (y,t,v):: tail -> if x=y then Some(t,v) else lookup tail x ;;
+    
+    exception TypeError ;;
+    let rec stroftipo = function
+    | Int -> "int"
+    | Bool -> "bool"
+    | Arrow (t1, t2) -> stroftipo t1 ^ " -> " ^ stroftipo t2
+    | Maybe t -> "maybe " ^ stroftipo t
+    | List t -> stroftipo t ^ " list" ;;
+
+    let rec strofexpr = function
+  | Nv n  -> string_of_int n
+  | Bv b -> string_of_bool b
+  | True -> "true"
+  | False -> "false"
+  | Bop (op, e1, e2) -> 
+      let op_str = match op with
+        | Sum -> "+"
+        | Sub -> "-"
+        | Mul -> "*"
+        | Div -> "/"
+        | And -> "&&"
+        | Or -> "||"
+        | Eq -> "=="
+        | Gt -> ">"
+        | Lt -> "<"
+        | Neq -> "!="
+      in
+      "(" ^ strofexpr e1 ^ " " ^ op_str ^ " " ^ strofexpr e2 ^ ")"
+  | If (cond, t_branch, f_branch) -> 
+      "if " ^ strofexpr cond ^ " then " ^ strofexpr t_branch ^ " else " ^ strofexpr f_branch
+  | Id x -> x
+  | App (e1, e2) -> strofexpr e1 ^ " " ^ strofexpr e2
+  | Fun (x, _, e) -> "fn " ^ x ^ " => " ^ strofexpr e
+  | Let (x, _, e1, e2) -> "let " ^ x ^ " = " ^ strofexpr e1 ^ " in " ^ strofexpr e2
+  | LetRec (f, _, e1, e2) -> "let rec " ^ f ^ " = " ^ strofexpr e1 ^ " in " ^ strofexpr e2
+  | Nil _ -> "[]"
+  | Cons (e1, e2) -> strofexpr e1 ^ "::" ^ strofexpr e2
+  | IsEmpty e -> "isempty " ^ strofexpr e
+  | Hd e -> "hd " ^ strofexpr e
+  | Tl e -> "tl " ^ strofexpr e
+  | Match (e1, e2, x, xs, e3) -> "match " ^ strofexpr e1 ^ " with | [] -> " ^ strofexpr e2 ^ " | " ^ x ^ "::" ^ xs ^ " -> " ^ strofexpr e3
+  | Nothing _ -> "nothing"
+  | Just e -> "just " ^ strofexpr e
+  | MatchMaybe (e1, e2, e3) -> "match " ^ strofexpr e1 ^ " with | nothing -> " ^ strofexpr e2 ^ " | just x" ^ " -> " ^ strofexpr e3 ;;
+
+
   let rec typeinfer (g:tyEnv) (e:expr) : tipo =
     match e with
       Nv _ -> Int (* Γ ⊢ n : int (Tint) *)
@@ -111,16 +143,16 @@ module Interpreter = struct
     | Id x ->
         (match lookup g x with
           None -> raise TypeError
-        | Some t -> t) (* Γ(x) = T => Γ ⊢ x : T (Tvar) *)
+        | Some (t, _) -> t) (* Γ(x) = T => Γ ⊢ x : T (Tvar) *)
         
     | Fun(x,t,e1) ->
-        let g' = (x,t)::g in
+        let g' = (x,t,None)::g in
         let t1 = typeinfer g' e1 in
         Arrow(t,t1) (* Γ, x : T ⊢ e : T′ => Γ ⊢ fn x : T ⇒ e : T → T′ (Tfn) *)
           
     | Let(x,t,e1,e2) ->
         let t1 = typeinfer g e1 in
-        let g' = (x,t)::g in
+        let g' = (x,t, None)::g in
         let t2 = typeinfer g' e2 in
         if t1=t then t2 else raise TypeError (*(Γ ⊢ e1 : T) && (Γ, x : T ⊢ e2 : T′) => Γ ⊢ let x:T = e1 in e2 : T′ (Tlet) *)
             
@@ -141,9 +173,9 @@ module Interpreter = struct
             match e1 with
             | Fun(y, t1', e1) ->
               if t1 = t1' then
-                let g' = (f, Arrow(t1, t2)) :: (y, t1) :: g in
+                let g' = (f, Arrow(t1, t2), None) :: (y, t1, None) :: g in
                 let t1_body = typeinfer g' e1 in
-                if t1_body = t2 then typeinfer ((f, Arrow(t1, t2)) :: g) e2
+                if t1_body = t2 then typeinfer ((f, Arrow(t1, t2), None) :: g) e2
                 else raise TypeError
               else raise TypeError
             | _ -> raise TypeError
@@ -151,7 +183,9 @@ module Interpreter = struct
         | _ -> raise TypeError
       end
     
-    | Nil t -> List t
+    | Nil t ->
+        (* Γ ⊢ nil : t list (Tnil) *)
+        List t
     
     | Cons(e1, e2) ->
         let t1 = typeinfer g e1 in
@@ -176,32 +210,22 @@ module Interpreter = struct
           | _ -> raise TypeError)
 
     | Match(e1, e2, x, xs, e3) ->
-        (match typeinfer g e1 with
-          | List t ->
-              let t2 = typeinfer g e2 in
-              let g' = (x, t) :: (xs, List t) :: g in
-              let t3 = typeinfer g' e3 in
-              if t2 = t3 then t2 else raise TypeError
-          | _ -> raise TypeError)
+        let t1 = typeinfer g e1 in
+        let t2 = typeinfer g e2 in
+        let g1 = (x, t1, None) :: (xs, List t1, None) :: g in
+        let t3 = typeinfer g1 e3 in
+        if t2 = t3 then t2 else raise TypeError
 
-    | Nothing(t) -> Maybe t
+    | Nothing t -> Maybe t
 
-    | Just(e) ->
-        let t = typeinfer g e in
-        Maybe t
+    | Just e ->
+        (match typeinfer g e with
+          | t -> Maybe t)
 
-    | MatchMaybe(e1, e2, x, e3, y, e4) ->
-        (match typeinfer g e1 with
-          | Maybe t ->
-              let t2 = typeinfer g e2 in
-              let g1 = (x, t) :: g in
-              let t3 = typeinfer g1 e3 in
-              if t2 = t3 then
-                let g2 = (y, Maybe t) :: g in
-                let t4 = typeinfer g2 e4 in
-                if t2 = t4 then t2 else raise TypeError
-              else raise TypeError
-          | _ -> raise TypeError)  ;;
+    | MatchMaybe(_, e2, e3) ->
+        let t2 = typeinfer g e2 in
+        let t3 = typeinfer g e3 in
+        if t2 = t3 then t2 else raise TypeError ;;       
             
           
   (* ======= AVALIADOR =========================*)
@@ -210,6 +234,8 @@ module Interpreter = struct
     match e with
       Nv _ | Bv _ | Fun _ -> true
     | _ -> false ;;
+
+  exception FixTypeInfer ;;
     
   let rec subs (v: expr) (x: string) (e: expr) = 
     match e with
@@ -225,7 +251,7 @@ module Interpreter = struct
       | Tl(e) -> Tl(subs v x e) (* {v/x} tl e = tl {v/x}e *)
       | Match(e1, e2, y, ys, e3) -> Match(subs v x e1, subs v x e2, y, ys, subs v x e3) (* {v/x} match e1 with | nil -> e2 | y::ys -> e3 = match {v/x}e1 with | nil -> {v/x}e2 | y::ys -> {v/x}e3 *)
       | Just(e) -> Just(subs v x e) (* {v/x} just e = just {v/x}e *)
-      | MatchMaybe(e1, e2, y, e3, z, e4) -> MatchMaybe(subs v x e1, subs v x e2, y, subs v x e3, z, subs v x e4) (* {v/x} match e1 with | nothing -> e2 | just z -> e3 = match {v/x}e1 with | nothing -> {v/x}e2 | just z -> {v/x}e3 *)
+      | MatchMaybe(e1, e2, e3) -> MatchMaybe(subs v x e1, subs v x e2, subs v x e3) (* {v/x} match e1 with | nothing -> e2 | just z -> e3 = match {v/x}e1 with | nothing -> {v/x}e2 | just z -> {v/x}e3 *)
       | Bop (o, e1, e2) -> Bop (o, subs v x e1, subs v x e2)  (* {v/x} (e1 op e2) = {v/x}e1 op {v/x}e2 *)
       | If (e1, e2, e3) -> If (subs v x e1, subs v x e2, subs v x e3) (* {v/x} (if e1 then e2 else e3) = if {v/x}e1 then {v/x}e2 else {v/x}e3 *)
       | App (e1, e2) -> App (subs v x e1, subs v x e2)  (* {v/x} (e1 e2) = {v/x}e1 {v/x}e2 *)
@@ -243,12 +269,9 @@ module Interpreter = struct
         | Arrow(_,_) ->
           if x = f then e (* {v/f }(let rec f : T1 → T2 = (fn y:T1 ⇒ e1) = let rec f : T1 → T2 = (fn y:T1 ⇒ e1) in e2) in e2 *)
           else LetRec(f, t, subs v x e1, subs v x e2) (* {v/x}(let rec f : T1 → T2 = (fn y:T1 ⇒ e1) = let rec f : T1 → T2 = {v/x}(fn y:T1 ⇒ e1) in e2) in {v/x} e2 se x̸ = f *)
-        | _ -> 
-          if x = f then e (* If the type is not an Arrow, treat it similarly *)
-          else LetRec (f, t, subs v x e1, subs v x e2) (* General case for other types *) ;;
+        | _ -> raise FixTypeInfer ;;
             
   exception DivZero ;;
-  exception FixTypeInfer ;;
     
   let compute (o:bop) (v1:expr) (v2:expr) =
     match (v1,v2) with
@@ -270,153 +293,113 @@ module Interpreter = struct
         | _ -> raise FixTypeInfer)
     | _ -> raise FixTypeInfer ;;
 
-  (* Semantica Operacional big step com substituicao para L1 *)
-  (* n ⇓ n (bnum)
-    b ⇓ b (bbool)
-    (e1 ⇓ false) && (e3 ⇓ v) => ρ ⊢ if e1 then e2 else e3 ⇓ v (biff)
-    fn x : T ⇒ e ⇓ fn x : T ⇒ e (bfn)
-    (e1 ⇓ n1) && (e2 ⇓ n2) && ([[n]] = [[n1]+[[n2]) => e1 + e2 ⇓ n (bop+)
-    (e1 ⇓ true) && (e2 ⇓ v) => if e1 then e2 else e3 ⇓ v (bift)
-    (e1 ⇓ v′) &&({v′/x} e2 ⇓ v) => let x : T = e1 in e2 ⇓ v (blet)
-    (e1 ⇓ fn x : T ⇒ e) && (e2 ⇓ v2) && ({v2/x} e ⇓ v) => e1 e2 ⇓ v (bapp)
-    {α/f } e2 ⇓ v => let rec f : T → T ′ = fn x : T ⇒ e1 in e2 ⇓ v (blrec)
-      α ≡ fn x : T ⇒ let rec f : T → T ′ = (fn x : T ⇒ e1) in e1
-  *)
   exception EvalError ;;
 
-  let rec eval(e:expr) : expr =
+  let rec eval (env: tyEnv) (e:expr) : expr =
     match e with
     | Nv n -> Nv(n) (* n ⇓ n (bnum) *)
     | Bv b -> Bv(b) (* b ⇓ b (bbool) *)
     | True -> Bv true
     | False -> Bv false
+
     | Bop(o,e1,e2) ->
-        let n1 = eval e1 in
-        let n2 = eval e2 in
+        let n1 = eval env e1 in
+        let n2 = eval env e2 in
         compute o n1 n2 (* (e1 ⇓ n1) && (e2 ⇓ n2) && ([[n]] = [[n1]+[[n2]) => e1 + e2 ⇓ n (bop+) *)
-    | Id _ -> e (* x ⇓ x (bvar) *)
+    
+    | Id x ->
+      (match lookup env x with
+        | Some (_,None) -> raise EvalError
+        | Some (_,Some v) -> v
+        | None -> raise EvalError) (* Γ(x) = v => ρ ⊢ x ⇓ v (bvar) *)
+        
     | If(e1,e2,e3) ->
-        let v1 = eval e1 in
+        let v1 = eval env e1 in
         (match v1 with
-          | Bv true -> eval e2
-          | Bv false -> eval e3
+          | Bv true -> eval env e2
+          | Bv false -> eval env e3
           | _ -> raise EvalError) (* (e1 ⇓ false) && (e3 ⇓ v) => ρ ⊢ if e1 then e2 else e3 ⇓ v (biff) *)
+
     | Fun(_,_,_) -> e (* fn x : T ⇒ e ⇓ fn x : T ⇒ e (bfn) *)
+
     | Let(x, _, e1, e2) ->
-        let v1 = eval e1 in
-        eval (subs v1 x e2) (* (e1 ⇓ v′) &&({v′/x} e2 ⇓ v) => let x : T = e1 in e2 ⇓ v (blet) *)
+        let v1 = eval env e1 in
+        eval env (subs v1 x e2) (* (e1 ⇓ v′) &&({v′/x} e2 ⇓ v) => let x : T = e1 in e2 ⇓ v (blet) *)
+
     | App(e1, e2) ->
-        let f = eval e1 in
-        let v2 = eval e2 in
-        (match f with
-          | Fun(x, _, e) -> eval (subs v2 x e)
-          | _ -> raise EvalError) (* (e1 ⇓ fn x : T ⇒ e) && (e2 ⇓ v2) && ({v2/x} e ⇓ v) => e1 e2 ⇓ v (bapp) *)
+      let f = eval env e1 in
+      let v2 = eval env e2 in
+      (match f with
+      | Fun(x, _, e) ->
+          eval env (subs v2 x e)
+      | _ -> raise EvalError)
+      
     | LetRec(f, t, e1, e2) ->
-        let alpha =
-          match t with
-          | Arrow(t1, t2) ->
-              (match e1 with
-                | Fun(y, t1', e1') -> Fun(y, t1', LetRec(f, Arrow(t1, t2), e1', e1'))
-                | _ -> raise EvalError)
-            | _ -> raise EvalError
-          in eval (subs alpha f e2) (* {α/f } e2 ⇓ v => let rec f : T → T ′ = fn x : T ⇒ e1 in e2 ⇓ v (blrec) *)
+      (match t with
+      | Arrow(_, _) ->
+          let rec_env = (f, t, Some e1) :: env in
+          eval rec_env e2
+      | _ -> raise EvalError)                    
+        
     | Nil _ -> e (* nil ⇓ nil (bnil) *)
+
     | Cons(e1, e2) ->
-        let v1 = eval e1 in
-        let v2 = eval e2 in
+        let v1 = eval env e1 in
+        let v2 = eval env e2 in
         Cons(v1, v2) (* (e1 ⇓ v1) && (e2 ⇓ v2) => e1::e2 ⇓ v1::v2 (bcons) *)
+    
     | IsEmpty(e1) ->
-        let v1 = eval e1 in
+        let v1 = eval env e1 in
         (match v1 with
           | Nil _ -> Bv true
           | Cons(_, _) -> Bv false
           | _ -> raise EvalError) (* isempty nil ⇓ true, isempty v ⇓ false for non-empty lists (bisempty) *)
+
     | Hd(e1) ->
-        let v1 = eval e1 in
+        let v1 = eval env e1 in
         (match v1 with
           | Cons(hd, _) -> hd
           | _ -> raise EvalError) (* hd (v::vs) ⇓ v (bhd) *)
+
     | Tl(e1) ->
-        let v1 = eval e1 in
+        let v1 = eval env e1 in
         (match v1 with
           | Cons(_, tl) -> tl
           | _ -> raise EvalError) (* tl (v::vs) ⇓ vs (btl) *)
-    | Match(e1, e2, x, xs, e3) ->
-        let v1 = eval e1 in
-        (match v1 with
-          | Nil _ -> eval e2
-          | Cons(hd, tl) -> eval (subs tl xs (subs hd x e3))
-          | _ -> raise EvalError) (* match nil -> e2 | x::xs -> e3 (bmatchlist) *)
-    | Nothing _ -> e (* nothing ⇓ nothing (bnothing) *)
-    | Just(e1) ->
-        let v1 = eval e1 in
-        Just v1 (* e1 ⇓ v => just e1 ⇓ just v (bjust) *)
-    | MatchMaybe(e1, e2, x, e3, _, _) ->
-        let v1 = eval e1 in
-        (match v1 with
-          | Nothing _ -> eval e2
-          | Just(vx) -> eval (subs vx x e3)
-          | _ -> raise EvalError) (* match nothing -> e2 | just x -> e3 (bmatchmaybe) *) ;;
 
+    | Match(e1, e2, x, xs, e3) ->
+        let v1 = eval env e1 in
+        (match v1 with
+          | Nil _ -> eval env e2
+          | Cons(hd, tl) -> eval env (subs tl xs (subs hd x e3))
+          | _ -> raise EvalError) (* match nil -> e2 | x::xs -> e3 (bmatchlist) *)
+
+    | Nothing _ -> e (* nothing ⇓ nothing (bnothing) *)
+
+    | Just(e1) ->
+        let v1 = eval env e1 in
+        Just v1 (* e1 ⇓ v => just e1 ⇓ just v (bjust) *)
+
+    | MatchMaybe(e1, e2, e3) ->
+        let v1 = eval env e1 in
+        (match v1 with
+          | Nothing _ -> eval env e2
+          | Just v -> eval env (subs v "x" e3)
+          | _ -> raise EvalError) ;; (* match nothing -> e2 | just x -> e3 (bmatchmaybe) *)
       
   (*===== INTEPRETADOR ========================*)
-
-  let rec strofexpr = function
-  | Nv n -> string_of_int n
-  | Bv b -> string_of_bool b
-  | True -> "true"
-  | False -> "false"
-  | Bop (op, e1, e2) -> 
-      let op_str = match op with
-        | Sum -> "+"
-        | Sub -> "-"
-        | Mul -> "*"
-        | Div -> "/"
-        | And -> "&&"
-        | Or -> "||"
-        | Eq -> "=="
-        | Gt -> ">"
-        | Lt -> "<"
-        | Neq -> "!="
-      in
-      "(" ^ strofexpr e1 ^ " " ^ op_str ^ " " ^ strofexpr e2 ^ ")"
-  | If (cond, t_branch, f_branch) -> 
-      "if " ^ strofexpr cond ^ " then " ^ strofexpr t_branch ^ " else " ^ strofexpr f_branch
-  | Id x -> x
-  | App (e1, e2) -> strofexpr e1 ^ " " ^ strofexpr e2
-  | Fun (x, _, e) -> "fn " ^ x ^ " => " ^ strofexpr e
-  | Let (x, _, e1, e2) -> "let " ^ x ^ " = " ^ strofexpr e1 ^ " in " ^ strofexpr e2
-  | LetRec (f, _, e1, e2) -> "let rec " ^ f ^ " = " ^ strofexpr e1 ^ " in " ^ strofexpr e2
-  | Nil _ -> "nil"
-  | Cons (e1, e2) -> strofexpr e1 ^ "::" ^ strofexpr e2
-  | IsEmpty e -> "isempty " ^ strofexpr e
-  | Hd e -> "hd " ^ strofexpr e
-  | Tl e -> "tl " ^ strofexpr e
-  | Match (e1, e2, x, xs, e3) -> "match " ^ strofexpr e1 ^ " with | nil -> " ^ strofexpr e2 ^ " | " ^ x ^ "::" ^ xs ^ " -> " ^ strofexpr e3
-  | Nothing _ -> "nothing"
-  | Just e -> "just " ^ strofexpr e
-  | MatchMaybe (e1, e2, x, e3, y, e4) -> "match " ^ strofexpr e1 ^ " with | nothing -> " ^ strofexpr e2 ^ " | just " ^ x ^ " -> " ^ strofexpr e3 ;;
-
-  let stroftipo = function
-  | Int -> "int"
-  | Bool -> "bool"
-  | _ -> "unknown_type" ;;
      
   let interpretador ~(env: tyEnv) (e: expr) : (string, string) result =
     try
       let t = typeinfer env e in
-      let v = eval e in
+      let v = eval env e in
       let result = (strofexpr e) ^ ": " ^ (stroftipo t) ^ " = " ^ (strofexpr v) in
-      print_endline ("DEBUG: " ^ result); (* Debug output *)
       Ok result
     with
     | TypeError -> 
-        print_endline "DEBUG: Erro de tipo"; (* Debug output *)
         Error "Erro de tipo"
     | DivZero -> 
-        print_endline "DEBUG: Divisão por zero"; (* Debug output *)
         Error "Divisão por zero"
     | Failure msg -> 
-        print_endline ("DEBUG: Failure - " ^ msg); (* Debug output *)
         Error msg ;; 
 end

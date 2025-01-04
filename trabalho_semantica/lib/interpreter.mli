@@ -31,9 +31,9 @@ module Interpreter : sig
     | Match of expr * expr * string * string * expr
     | Nothing of tipo
     | Just of expr
-    | MatchMaybe of expr * expr * string * expr * string * expr
+    | MatchMaybe of expr * expr * expr
 
-    type tyEnv = (string * tipo) list
+    type tyEnv = (string * tipo * expr option) list
 
     (* ====== EXCEPTIONS ====== *)
 
@@ -44,13 +44,13 @@ module Interpreter : sig
 
     (* ====== FUNCTIONS ====== *)
 
-    val lookup : tyEnv -> string -> tipo option
+    val lookup : tyEnv -> string -> (tipo * expr option) option
 
     val typeinfer : tyEnv -> expr -> tipo
 
     val compute : bop -> expr -> expr -> expr
 
-    val eval : expr -> expr
+    val eval : tyEnv -> expr -> expr
 
     val subs : expr -> string -> expr -> expr
 
