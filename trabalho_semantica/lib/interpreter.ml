@@ -41,8 +41,6 @@ module Interpreter = struct
   type expr = 
       Nv of int (* n *)
     | Bv of bool (* b *)
-    | True
-    | False
     | Bop of bop * expr * expr (* e1 op e2  *)
     | If  of expr * expr * expr (* if e1 then e2 else e3 *)
     | Id  of string (* x *)
@@ -68,19 +66,17 @@ module Interpreter = struct
       [] -> None
     | (y,t,v):: tail -> if x=y then Some(t,v) else lookup tail x ;;
     
-    exception TypeError ;;
-    let rec stroftipo = function
-    | Int -> "int"
-    | Bool -> "bool"
-    | Arrow (t1, t2) -> stroftipo t1 ^ " -> " ^ stroftipo t2
-    | Maybe t -> "maybe " ^ stroftipo t
-    | List t -> stroftipo t ^ " list" ;;
+  exception TypeError ;;
+  let rec stroftipo = function
+  | Int -> "int"
+  | Bool -> "bool"
+  | Arrow (t1, t2) -> stroftipo t1 ^ " -> " ^ stroftipo t2
+  | Maybe t -> "maybe " ^ stroftipo t
+  | List t -> stroftipo t ^ " list" ;;
 
   let rec strofexpr = function
     | Nv n  -> string_of_int n
     | Bv b -> string_of_bool b
-    | True -> "true"
-    | False -> "false"
     | Bop (op, e1, e2) -> 
         let op_str = match op with
           | Sum -> "+"
@@ -116,8 +112,6 @@ module Interpreter = struct
     match e with
       Nv _ -> Int (* Γ ⊢ n : int (Tint) *)
     | Bv _ -> Bool (* Γ ⊢ b : bool (Tbool) *)
-    | True -> Bool
-    | False -> Bool
 
     | Bop(o1,e1,e2) -> 
         let t1 = typeinfer g e1 in
@@ -240,8 +234,6 @@ module Interpreter = struct
     match e with
       | Nv _ -> e (* {v/x} n = n *)
       | Bv _ -> e (* {v/x} b = b *)
-      | True -> e (* {v/x} true = true *)
-      | False -> e (* {v/x} false = false *)
       | Nil _ -> e (* {v/x} nil = nil *)
       | Nothing _ -> e (* {v/x} nothing = nothing *)
       | Cons(e1, e2) -> Cons(subs v x e1, subs v x e2) (* {v/x} (e1::e2) = {v/x}e1::{v/x}e2 *)
@@ -298,8 +290,6 @@ module Interpreter = struct
     match e with
     | Nv n -> Nv(n) (* n ⇓ n (bnum) *)
     | Bv b -> Bv(b) (* b ⇓ b (bbool) *)
-    | True -> Bv true
-    | False -> Bv false
 
     | Bop(o,e1,e2) ->
         let n1 = eval env e1 in

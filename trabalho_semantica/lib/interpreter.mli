@@ -12,10 +12,8 @@ module Interpreter : sig
     | List of tipo
 
     type expr =
-        Nv of int
+    Nv of int
     | Bv of bool
-    | True
-    | False
     | Bop of bop * expr * expr
     | If of expr * expr * expr
     | Id of string
